@@ -126,10 +126,10 @@ def write_dump_as_csvs(db_dict,relations_dict,load_dir,dumpFilePath):
 
 
 def do_extract(server, dump_file, dump_dir, extracted_dir, db_dict):
-    # empty_dir(dump_dir)
-    # empty_dir(extracted_dir)
-    # send_to_neo4j(get_driver(server), "CALL apoc.export.csv.all('" + dump_file + "', {})")
-    # copy_file_from_server(server, dump_file, dump_dir)
+    empty_dir(dump_dir)
+    empty_dir(extracted_dir)
+    send_to_neo4j(get_driver(server), "CALL apoc.export.csv.all('" + dump_file + "', {})")
+    copy_file_from_server(server, dump_file, dump_dir)
     dump_file_path = dump_dir + dump_file
     relations_dict = extract_relations(dump_file_path)
     write_dump_as_csvs(db_dict, relations_dict, extracted_dir, dump_file_path)
