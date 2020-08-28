@@ -113,8 +113,6 @@ def get_interface(db_dict, object_name):
 
 
 
-
-
 def auto_load(driver, object_name, db_dict, server, transformed_dir, export_dir):
     index_command = 'CREATE INDEX ON :' + object_name + '(id)'
     send_to_neo4j(driver,index_command)

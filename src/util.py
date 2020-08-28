@@ -8,7 +8,7 @@ from neo4j import GraphDatabase
 
 
 def empty_dir(path):
-    filelist = [f for f in os.listdir(path) if f.endswith(".csv")]
+    filelist = [f for f in os.listdir(path)]
     for f in filelist:
         os.remove(os.path.join(path, f))
 
