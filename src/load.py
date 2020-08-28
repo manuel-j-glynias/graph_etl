@@ -1,30 +1,31 @@
 import shutil
 
-from src.util import get_schema, send_to_neo4j, empty_dir, get_driver, find_nullable_relations
+from src.util import get_schema, send_to_neo4j, empty_dir, get_driver, find_nullable_relations, list_based_columns
 from sys import platform
 import subprocess
 import os
 
 
-def get_match(db_dict, object_name):
+def get_match(db_dict, object_name,nullable):
     match = ''
     cols = db_dict['OmniSeqKnowledgebase2'][object_name]['col_order']
     for col in cols:
-        col_description = db_dict['OmniSeqKnowledgebase2'][object_name][col]
-        dataType = col_description[6]
-        if len(col_description[4])==0:
-            type_name = col[:-9]
-        else:
-            type_name = col_description[4][0][:-9]
-        if dataType == 'id' and type_name != '':
-            if match != '':
-                match += '\n'
-            if col.endswith('_graph_id'):
-                col = col[:-9]
-                col = col[0].lower() + col[1:]
+        if col not in nullable:
+            col_description = db_dict['OmniSeqKnowledgebase2'][object_name][col]
+            dataType = col_description[6]
+            if len(col_description[4])==0:
+                type_name = col[:-9]
+            else:
+                type_name = col_description[4][0][:-9]
+            if dataType == 'id' and type_name != '':
+                if match != '':
+                    match += '\n'
+                if col.endswith('_graph_id'):
+                    col = col[:-9]
+                    col = col[0].lower() + col[1:]
 
-            tag = get_tag_name(col,type_name)
-            match += 'MATCH(' + tag + ':' + type_name + ') WHERE ' + tag + '.id=' + col
+                tag = get_tag_name(col,type_name)
+                match += 'MATCH(' + tag + ':' + type_name + ') WHERE ' + tag + '.id=' + col
     if match != '':
         match = '\n' + match
     return match
@@ -76,30 +77,31 @@ def get_params(db_dict, object_name):
     return params
 
 
-def get_row_reader(db_dict, object_name):
+def get_row_reader(db_dict, object_name,nullable):
     read_command = ''
     cols = db_dict['OmniSeqKnowledgebase2'][object_name]['col_order']
     for col in cols:
-        col_description = db_dict['OmniSeqKnowledgebase2'][object_name][col]
-        dataType = col_description[6]
-        if dataType != 'List':
-            col2 = col
-            if col2 == 'graph_id':
-                col2 = 'id'
-            if col2.endswith('_graph_id'):
-                col2 = col2[:-9]
-                col2 = col2[0].lower() + col2[1:]
-            if read_command != '':
-                read_command += ', '
-            if dataType == 'Boolean':
-                read_command += 'toBoolean(row.' + col + ') as ' + col2
-            elif dataType == 'Int':
-                read_command += 'toInteger(row.'+ col + ') as ' + col2
-            elif dataType == 'piped_list':
-                # split(row.stringList, "|")
-                read_command += 'split(row.' + col + ', "|") as ' + col2
-            else:
-                read_command += 'row.' + col + ' as ' + col2
+        if col not in nullable:
+            col_description = db_dict['OmniSeqKnowledgebase2'][object_name][col]
+            dataType = col_description[6]
+            if dataType != 'List':
+                col2 = col
+                if col2 == 'graph_id':
+                    col2 = 'id'
+                if col2.endswith('_graph_id'):
+                    col2 = col2[:-9]
+                    col2 = col2[0].lower() + col2[1:]
+                if read_command != '':
+                    read_command += ', '
+                if dataType == 'Boolean':
+                    read_command += 'toBoolean(row.' + col + ') as ' + col2
+                elif dataType == 'Int':
+                    read_command += 'toInteger(row.'+ col + ') as ' + col2
+                elif dataType == 'piped_list':
+                    # split(row.stringList, "|")
+                    read_command += 'split(row.' + col + ', "|") as ' + col2
+                else:
+                    read_command += 'row.' + col + ' as ' + col2
     return read_command
 
 
@@ -110,15 +112,7 @@ def get_interface(db_dict, object_name):
     return interface
 
 
-def list_based_columns(db_dict, object_name):
-    list_based = []
-    cols = db_dict['OmniSeqKnowledgebase2'][object_name]['col_order']
-    for col in cols:
-        col_description = db_dict['OmniSeqKnowledgebase2'][object_name][col]
-        dataType = col_description[6]
-        if dataType == 'List':
-            list_based.append(col)
-    return list_based
+
 
 
 def auto_load(driver, object_name, db_dict, server, transformed_dir, export_dir):
@@ -131,8 +125,8 @@ def auto_load(driver, object_name, db_dict, server, transformed_dir, export_dir)
         file_name = object_name + str(file_counter) + '.csv'
         sync_to_server(server, export_dir, file_name)
         read_command = f"LOAD CSV WITH HEADERS FROM 'file:///{file_name}' AS row" + '\nWITH '
-        read_command += get_row_reader(db_dict, object_name)
-        read_command += get_match(db_dict, object_name)
+        read_command += get_row_reader(db_dict, object_name,nullable)
+        read_command += get_match(db_dict, object_name,nullable)
         interface = get_interface(db_dict, object_name)
         tag = object_name.lower()
         read_command += '\nCREATE (' + tag + ':' + object_name + interface + ' {'
@@ -144,16 +138,10 @@ def auto_load(driver, object_name, db_dict, server, transformed_dir, export_dir)
         col_description = db_dict['OmniSeqKnowledgebase2'][object_name][col]
         relation = col_description[5]
         for xObject_name in col_description[4]:
+            xObject_name = xObject_name.replace('.', '_')
             xObject_name_short = xObject_name[:-9]
             yObject_name = object_name + '_graph_id'
-            file_name = object_name + '_' + xObject_name_short + '.csv'
-            shutil.copy(os.path.realpath(transformed_dir + file_name), os.path.realpath(export_dir + file_name))
-            sync_to_server(server, export_dir, file_name)
-            read_command = f"LOAD CSV WITH HEADERS FROM 'file:///{file_name}' AS row" + f'\nWITH row.{xObject_name} as x, row.{yObject_name} as y' + '\n'
-            read_command += f'MATCH(xx:{xObject_name_short}) WHERE xx.id=x'+ '\n'
-            read_command += f'MATCH(yy:{object_name}) WHERE yy.id=y'+ '\n'
-            read_command += f'CREATE (yy)-[:{relation}]->(xx)'+ '\n'
-            send_to_neo4j(driver, read_command)
+            write_XFile_command(driver, export_dir, object_name, relation, server, transformed_dir, xObject_name, xObject_name_short, yObject_name)
     for n in nullable:
         col_description = db_dict['OmniSeqKnowledgebase2'][object_name][n]
         relation = col_description[5]
@@ -161,14 +149,18 @@ def auto_load(driver, object_name, db_dict, server, transformed_dir, export_dir)
             xObject_name = xObject_name.replace('.','_')
             xObject_name_short = xObject_name[:-9]
             yObject_name = object_name + '_graph_id'
-            file_name = object_name + '_' + xObject_name_short + '.csv'
-            shutil.copy(os.path.realpath(transformed_dir + file_name), os.path.realpath(export_dir + file_name))
-            sync_to_server(server, export_dir, file_name)
-            read_command = f"LOAD CSV WITH HEADERS FROM 'file:///{file_name}' AS row" + f'\nWITH row.{xObject_name} as x, row.{yObject_name} as y' + '\n'
-            read_command += f'MATCH(xx:{xObject_name_short}) WHERE xx.id=x' + '\n'
-            read_command += f'MATCH(yy:{object_name}) WHERE yy.id=y' + '\n'
-            read_command += f'CREATE (yy)-[:{relation}]->(xx)' + '\n'
-            send_to_neo4j(driver, read_command)
+            write_XFile_command(driver, export_dir, object_name, relation, server, transformed_dir, xObject_name, xObject_name_short, yObject_name)
+
+
+def write_XFile_command(driver, export_dir, object_name, relation, server, transformed_dir, xObject_name, xObject_name_short, yObject_name):
+    file_name = object_name + '_' + xObject_name_short + '.csv'
+    shutil.copy(os.path.realpath(transformed_dir + file_name), os.path.realpath(export_dir + file_name))
+    sync_to_server(server, export_dir, file_name)
+    read_command = f"LOAD CSV WITH HEADERS FROM 'file:///{file_name}' AS row" + f'\nWITH row.{xObject_name} as x, row.{yObject_name} as y' + '\n'
+    read_command += f'MATCH(xx:{xObject_name_short}) WHERE xx.id=x' + '\n'
+    read_command += f'MATCH(yy:{object_name}) WHERE yy.id=y' + '\n'
+    read_command += f'CREATE (yy)-[:{relation}]->(xx)' + '\n'
+    send_to_neo4j(driver, read_command)
 
 
 def get_import_path():
@@ -216,8 +208,8 @@ def split_big_files(file_name,export_dir):
     os.remove(export_dir + in_file)
     return file_num
 
-def do_load(server,transformed_dir,export_dir,db_dict,data_types):
-    with open('../config/schema_03_11.graphql', 'r') as file:
+def do_load(server,transformed_dir,export_dir,db_dict,data_types,schema_path):
+    with open(schema_path, 'r') as file:
         idl_as_string = file.read()
     driver = get_driver(server)
     send_to_neo4j(driver, "match(a) detach delete(a)")
@@ -233,6 +225,7 @@ if __name__ == '__main__':
     transformed_dir = '../transformed/'
     export_dir = '../export/'
     data_types = ['User','Author','Journal','InternetReference','LiteratureReference','EditableInt','EditableStatement','EditableStringList','JaxGene','MyGeneInfoGene','UniprotEntry','OmniGene']
-    do_load(server,transformed_dir,export_dir,db_dict,data_types)
+    schema_path = '../config/schema_03_11.graphql'
+    do_load(server,transformed_dir,export_dir,db_dict,data_types,schema_path)
 
 

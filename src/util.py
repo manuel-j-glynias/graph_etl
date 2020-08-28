@@ -118,3 +118,13 @@ def find_nullable_relations(db_dict,object_name):
         if relation!='' and dataType != 'List' and allow_null=='Y':
             nullable.append(col)
     return nullable
+
+def list_based_columns(db_dict, object_name):
+    list_based = []
+    cols = db_dict['OmniSeqKnowledgebase2'][object_name]['col_order']
+    for col in cols:
+        col_description = db_dict['OmniSeqKnowledgebase2'][object_name][col]
+        dataType = col_description[6]
+        if dataType == 'List':
+            list_based.append(col)
+    return list_based

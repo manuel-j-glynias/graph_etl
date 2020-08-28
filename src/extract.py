@@ -1,7 +1,7 @@
 import csv
 from neo4j import GraphDatabase
 
-from src.util import send_to_neo4j, copy_file_from_server, empty_dir, get_schema, get_driver
+from src.util import send_to_neo4j, copy_file_from_server, empty_dir, get_schema, get_driver, list_based_columns
 
 
 def extract_relations(dumpFilePath):
@@ -28,6 +28,9 @@ def extract_relations(dumpFilePath):
                     object1 = id_dict[row['_start']]
                     object2 = id_dict[row['_end']]
                     relation = row['_type']
+                    # this is a hack since relation wasn't labeled when objects were loaded
+                    if relation=="conjunction":
+                        relation = 'CONJUCTION'
                     if not object1 in relations_dict:
                         relations_dict[object1] = {object2:relation}
                     else:
@@ -81,28 +84,40 @@ def write_dump_as_csvs(db_dict,relations_dict,load_dir,dumpFilePath):
             counter += 1
             data_types = row['_labels'].split(':')
             data_type = get_data_type(data_types,db_dict)
+            # if data_type=='EditableMarkerComponentList':
+            #     print("here")
             if not data_type==None and data_type in files_dict:
                 writer = files_dict[data_type]
                 cols = db_dict['OmniSeqKnowledgebase2'][data_type]['col_order']
                 new_row = []
+                list_based_cols = list_based_columns(db_dict, data_type)
                 for col in cols:
                     if col=='graph_id':
                         col = 'id'
                     if col in row:
                         new_row.append( row[col])
                     else:
+
                         d = relations_dict[row['id']]
                         # get_id_for_relation(d,col)
                         relation = db_dict['OmniSeqKnowledgebase2'][data_type][col][5]
                         id_for_relation = get_id_for_relation(d, relation)
-                        if id_for_relation != None and  id_for_relation.startswith('ref_'):
-                            for ref in id_for_relation.split('|'):
-                                if ref.startswith('ref_g'):
-                                    key = data_type + '_InternetReference'
-                                else:
-                                    key = data_type + '_LiteratureReference'
+                        if id_for_relation != None:
+                            if id_for_relation.startswith('ref_'):
+                                for ref in id_for_relation.split('|'):
+                                    if ref.startswith('ref_g'):
+                                        key = data_type + '_InternetReference'
+                                    else:
+                                        key = data_type + '_LiteratureReference'
+                                    ref_writer = files_dict[key]
+                                    ref_writer.writerow(['', row['id'], ref])
+                            elif col in list_based_cols:
+                                dt = db_dict['OmniSeqKnowledgebase2'][data_type][col][4][0]
+                                dt = dt[:-9]
+                                key = data_type + '_' + dt
                                 ref_writer = files_dict[key]
-                                ref_writer.writerow(['', row['id'], ref])
+                                for ref in id_for_relation.split('|'):
+                                    ref_writer.writerow(['', ref, row['id']])
 
                         new_row.append(id_for_relation)
                 writer.writerow(new_row)
@@ -111,10 +126,10 @@ def write_dump_as_csvs(db_dict,relations_dict,load_dir,dumpFilePath):
 
 
 def do_extract(server, dump_file, dump_dir, extracted_dir, db_dict):
-    empty_dir(dump_dir)
-    empty_dir(extracted_dir)
-    send_to_neo4j(get_driver(server), "CALL apoc.export.csv.all('" + dump_file + "', {})")
-    copy_file_from_server(server, dump_file, dump_dir)
+    # empty_dir(dump_dir)
+    # empty_dir(extracted_dir)
+    # send_to_neo4j(get_driver(server), "CALL apoc.export.csv.all('" + dump_file + "', {})")
+    # copy_file_from_server(server, dump_file, dump_dir)
     dump_file_path = dump_dir + dump_file
     relations_dict = extract_relations(dump_file_path)
     write_dump_as_csvs(db_dict, relations_dict, extracted_dir, dump_file_path)
